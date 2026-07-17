@@ -6,7 +6,7 @@ This repository remains licensed under the Creative Commons Attribution-NonComme
 This code has been used here https://doi.org/10.1016/j.cageo.2025.106076 (Facies and acoustic impedance modeling) and will soon be presented for additional research works.
 
 
-_ README from the original repo ____________________________________________________________________________________________________________________________________
+_ README from the original repo __________________________________________________________________________________________________________________________________
 
 ## Elucidating the Design Space of Diffusion-Based Generative Models (EDM)<br><sub>Official PyTorch implementation of the NeurIPS 2022 paper</sub>
 
