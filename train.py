@@ -36,43 +36,47 @@ def parse_int_list(s):
             ranges.append(int(p))
     return ranges
 
-#----------------------------------------------------------------------------
+# ----------------------------------------------------------------------------
 
 @click.command()
 
 # Main options.
-@click.option('--outdir',        help='Where to save the results', metavar='DIR',                   type=str, required=True)
-@click.option('--data',          help='Path to the dataset', metavar='ZIP|DIR',                     type=str, required=True)
+@click.option('--outdir',        default = '/',                                help='Where to save the results', metavar='DIR',                   type=str, required=True)
+@click.option('--data',          default = '/',                    help='Path to the dataset', metavar='ZIP|DIR',                     type=str, required=True)
+@click.option('--image_size',    default = [], help='[z,x] of the image',                     type=list, required=True)
+@click.option('--image_depth',   default = 1, help='b of properties of the image',                  type=int, required=True)
+
 @click.option('--cond',          help='Train class-conditional model', metavar='BOOL',              type=bool, default=False, show_default=True)
-@click.option('--arch',          help='Network architecture', metavar='ddpmpp|ncsnpp|adm',          type=click.Choice(['ddpmpp', 'ncsnpp', 'adm']), default='ddpmpp', show_default=True)
+@click.option('--arch',          help='Network architecture', metavar='ddpmpp|ncsnpp|adm',          type=click.Choice(['ddpmpp', 'ncsnpp', 'adm']), default='adm', show_default=True)
+@click.option('--geost_predict', help='Network predicts labels', metavar='BOOL',                    type=bool, default=False, show_default=True)
 @click.option('--precond',       help='Preconditioning & loss function', metavar='vp|ve|edm',       type=click.Choice(['vp', 've', 'edm']), default='edm', show_default=True)
 
 # Hyperparameters.
-@click.option('--duration',      help='Training duration', metavar='MIMG',                          type=click.FloatRange(min=0, min_open=True), default=200, show_default=True)
-@click.option('--batch',         help='Total batch size', metavar='INT',                            type=click.IntRange(min=1), default=512, show_default=True)
+@click.option('--duration',      help='Training duration', metavar='MIMG',                          type=click.FloatRange(min=0, min_open=True), default = 30, show_default=True) #22.467
+@click.option('--batch',         help='Total batch size', metavar='INT',                            type=click.IntRange(min=1), default = 1, show_default=True)
 @click.option('--batch-gpu',     help='Limit batch size per GPU', metavar='INT',                    type=click.IntRange(min=1))
 @click.option('--cbase',         help='Channel multiplier  [default: varies]', metavar='INT',       type=int)
 @click.option('--cres',          help='Channels per resolution  [default: varies]', metavar='LIST', type=parse_int_list)
-@click.option('--lr',            help='Learning rate', metavar='FLOAT',                             type=click.FloatRange(min=0, min_open=True), default=10e-4, show_default=True)
+@click.option('--lr',            help='Learning rate', metavar='FLOAT',                             type=click.FloatRange(min=0, min_open=True), default=2e-5, show_default=True)
 @click.option('--ema',           help='EMA half-life', metavar='MIMG',                              type=click.FloatRange(min=0), default=0.5, show_default=True)
-@click.option('--dropout',       help='Dropout probability', metavar='FLOAT',                       type=click.FloatRange(min=0, max=1), default=0.13, show_default=True)
-@click.option('--augment',       help='Augment probability', metavar='FLOAT',                       type=click.FloatRange(min=0, max=1), default=0.12, show_default=True)
+@click.option('--dropout',       help='Dropout probability', metavar='FLOAT',                       type=click.FloatRange(min=0, max=1), default=0.1, show_default=True)
+@click.option('--augment',       help='Augment probability', metavar='FLOAT',                       type=click.FloatRange(min=0, max=1), default=0, show_default=True)
 @click.option('--xflip',         help='Enable dataset x-flips', metavar='BOOL',                     type=bool, default=False, show_default=True)
 
 # Performance-related.
-@click.option('--fp16',          help='Enable mixed-precision training', metavar='BOOL',            type=bool, default=False, show_default=True)
+@click.option('--fp16',          help='Enable mixed-precision training', metavar='BOOL',            type=bool, default=True, show_default=True)
 @click.option('--ls',            help='Loss scaling', metavar='FLOAT',                              type=click.FloatRange(min=0, min_open=True), default=1, show_default=True)
 @click.option('--bench',         help='Enable cuDNN benchmarking', metavar='BOOL',                  type=bool, default=True, show_default=True)
 @click.option('--cache',         help='Cache dataset in CPU memory', metavar='BOOL',                type=bool, default=True, show_default=True)
-@click.option('--workers',       help='DataLoader worker processes', metavar='INT',                 type=click.IntRange(min=1), default=1, show_default=True)
+@click.option('--workers',       help='DataLoader worker processes', metavar='INT',                 type=click.IntRange(min=1), default=4, show_default=True)
 
 # I/O-related.
-@click.option('--desc',          help='String to include in result dir name', metavar='STR',        type=str)
+@click.option('--desc',          help='String to include in result dir name', metavar='STR',        type=str, default='')
 @click.option('--nosubdir',      help='Do not create a subdirectory for results',                   is_flag=True)
-@click.option('--tick',          help='How often to print progress', metavar='KIMG',                type=click.IntRange(min=1), default=50, show_default=True)
-@click.option('--snap',          help='How often to save snapshots', metavar='TICKS',               type=click.IntRange(min=1), default=50, show_default=True)
-@click.option('--dump',          help='How often to dump state', metavar='TICKS',                   type=click.IntRange(min=1), default=500, show_default=True)
-@click.option('--seed',          help='Random seed  [default: random]', metavar='INT',              type=int)
+@click.option('--tick',          help='How often to print progress', metavar='KIMG',                type=click.IntRange(min=1), default= 1, show_default=True) #149.780 - 74.890*2 means every two "epochs"
+@click.option('--snap',          help='How often to save snapshots', metavar='TICKS',               type=click.IntRange(min=1), default= 50, show_default=True)
+@click.option('--dump',          help='How often to dump state', metavar='TICKS',                   type=click.IntRange(min=1), default= 50, show_default=True)
+@click.option('--seed',          help='Random seed  [default: random]', metavar='INT',              type=int, default = 567644504)
 @click.option('--transfer',      help='Transfer learning from network pickle', metavar='PKL|URL',   type=str)
 @click.option('--resume',        help='Resume from previous training state', metavar='PT',          type=str)
 @click.option('-n', '--dry-run', help='Print training options and exit',                            is_flag=True)
@@ -94,7 +98,8 @@ def main(**kwargs):
 
     # Initialize config dict.
     c = dnnlib.EasyDict()
-    c.dataset_kwargs = dnnlib.EasyDict(class_name='training.dataset.ImageFolderDataset', path=opts.data, use_labels=opts.cond, xflip=opts.xflip, cache=opts.cache)
+    c.dataset_kwargs = dnnlib.EasyDict(class_name='training.dataset.FaciesSet_parse3D', path=opts.data, image_size = opts.image_size, image_depth=opts.image_depth, 
+                                       use_labels=opts.cond if not opts.geost_predict else True, xflip=opts.xflip, cache=opts.cache) 
     c.data_loader_kwargs = dnnlib.EasyDict(pin_memory=True, num_workers=opts.workers, prefetch_factor=2)
     c.network_kwargs = dnnlib.EasyDict()
     c.loss_kwargs = dnnlib.EasyDict()
@@ -111,7 +116,7 @@ def main(**kwargs):
         del dataset_obj # conserve memory
     except IOError as err:
         raise click.ClickException(f'--data: {err}')
-
+    
     # Network architecture.
     if opts.arch == 'ddpmpp':
         c.network_kwargs.update(model_type='SongUNet', embedding_type='positional', encoder_type='standard', decoder_type='standard')
@@ -121,8 +126,8 @@ def main(**kwargs):
         c.network_kwargs.update(channel_mult_noise=2, resample_filter=[1,3,3,1], model_channels=128, channel_mult=[2,2,2])
     else:
         assert opts.arch == 'adm'
-        c.network_kwargs.update(model_type='DhariwalUNet', model_channels=192, channel_mult=[1,2,3,4])
-
+        c.network_kwargs.update(model_type='DhariwalUNet', model_channels=8, channel_mult=[1,1,1,1])
+    
     # Preconditioning & loss function.
     if opts.precond == 'vp':
         c.network_kwargs.class_name = 'training.networks.VPPrecond'
@@ -130,10 +135,12 @@ def main(**kwargs):
     elif opts.precond == 've':
         c.network_kwargs.class_name = 'training.networks.VEPrecond'
         c.loss_kwargs.class_name = 'training.loss.VELoss'
+    
     else:
         assert opts.precond == 'edm'
         c.network_kwargs.class_name = 'training.networks.EDMPrecond'
-        c.loss_kwargs.class_name = 'training.loss.EDMLoss'
+        c.loss_kwargs.class_name = 'training.loss.EDMLoss' if not opts.geost_predict else 'training.loss.EDMLoss_geost'
+        print(c.loss_kwargs.class_name)
 
     # Network options.
     if opts.cbase is not None:
@@ -145,6 +152,9 @@ def main(**kwargs):
         c.augment_kwargs.update(xflip=1e8, yflip=1, scale=1, rotate_frac=1, aniso=1, translate_frac=1)
         c.network_kwargs.augment_dim = 9
     c.network_kwargs.update(dropout=opts.dropout, use_fp16=opts.fp16)
+    c.network_kwargs.update(attn_resolutions = [c.dataset_kwargs.resolution//2,c.dataset_kwargs.resolution//4,c.dataset_kwargs.resolution//8])
+    print('Attention is being imposed at each layer')
+    c.network_kwargs.update(geost_predict = opts.geost_predict)
 
     # Training options.
     c.total_kimg = max(int(opts.duration * 1000), 1)
@@ -159,7 +169,7 @@ def main(**kwargs):
     else:
         seed = torch.randint(1 << 31, size=[], device=torch.device('cuda'))
         torch.distributed.broadcast(seed, src=0)
-        c.seed = int(seed)
+        c.seed = int(seed)  
 
     # Transfer learning and resume.
     if opts.transfer is not None:
@@ -226,11 +236,15 @@ def main(**kwargs):
         dnnlib.util.Logger(file_name=os.path.join(c.run_dir, 'log.txt'), file_mode='a', should_flush=True)
 
     # Train.
-    training_loop.training_loop(**c)
-
-#----------------------------------------------------------------------------
+    try:
+        training_loop.training_loop(**c)
+    finally:
+        dist.destroy_process_group()
+#-------------------------------------------------------------  ---------------
 
 if __name__ == "__main__":
+    
     main()
 
 #----------------------------------------------------------------------------
+
