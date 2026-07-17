@@ -89,6 +89,7 @@ class Conv2d(torch.nn.Module):
             x = x.add_(b.reshape(1, -1, 1, 1))
         return x
 
+
 #----------------------------------------------------------------------------
 # Group normalization.
 
@@ -218,6 +219,79 @@ class FourierEmbedding(torch.nn.Module):
         x = x.ger((2 * np.pi * self.freqs).to(x.dtype))
         x = torch.cat([x.cos(), x.sin()], dim=1)
         return x
+
+#-----------------------------------------------------------------------------
+# Output Label head for geostatistical parameters (Roberto Miele, 2026)
+@persistence.persistent_class
+class OutLabel_Head(torch.nn.Module):
+   def __init__(self, in_channels, out_channels, img_resolution):
+       super().__init__()
+
+       k = img_resolution//8
+       
+       #avg padding that squares Unet bottlneck
+       self.pool1 = torch.nn.AdaptiveAvgPool2d((k,k)) 
+       
+       self.gn1 = torch.nn.GroupNorm(num_groups=32, num_channels=in_channels)
+
+       #A Conv2d but without padding out --> [256, k//2, k//2]
+       init_kwargs = dict(mode='kaiming_normal', fan_in=in_channels*k*k, fan_out=256*k*k)
+       self.weight = torch.nn.Parameter(weight_init([256, in_channels, k, k], **init_kwargs))
+       self.bias = torch.nn.Parameter(weight_init([256], **init_kwargs) * 0)
+       
+       self.conv1 = torch.nn.Conv2d(in_channels=in_channels, out_channels=256, kernel_size=k//2)
+       self.conv1.weight = self.weight
+       self.conv1.bias = self.bias
+
+       #self.flatten = torch.nn.Flatten()
+
+       self.gn2 = torch.nn.GroupNorm(num_groups=32, num_channels=256)
+
+       self.fc1 = Linear(256, 128)
+       self.ln = torch.nn.LayerNorm(128)
+       self.fc2 = Linear(128, out_channels)
+   
+   def forward(self, x):
+       x = self.pool1(x.float()) #reduces shape to a square if its not
+       
+       x = self.conv1(self.gn1(x)) #2D convolution: out -> [k//2,k//2]
+       x = silu(x)
+       
+       x = self.gn2(x)
+       x = x.mean(dim=[2, 3])
+       x = self.fc1(x)
+       
+       x = silu(self.ln(x))
+       
+       x = self.fc2(x)
+
+       return x
+
+# @persistence.persistent_class
+# class OutLabel_Head(torch.nn.Module):
+#     def __init__(self, in_channels=512, out_channels=5, img_resolution=None):
+#         super().__init__()
+
+#         self.gn = torch.nn.GroupNorm(32, in_channels)
+        
+#         self.fc1 = Linear(512, 256)
+        
+#         self.fc2 = Linear(256, 128)
+        
+#         self.fc3 = Linear(128, out_channels)
+
+#     def forward(self, x):
+        
+#         x = self.gn(x.float())
+        
+#         x = x.mean(dim=[2, 3])   # global pooling ? [B, 512]
+        
+#         x = silu(self.fc1(x))
+        
+#         x = silu(self.fc2(x))
+        
+#         return self.fc3(x)
+
 
 #----------------------------------------------------------------------------
 # Reimplementation of the DDPM++ and NCSN++ architectures from the paper
@@ -377,15 +451,17 @@ class DhariwalUNet(torch.nn.Module):
         label_dim           = 0,            # Number of class labels, 0 = unconditional.
         augment_dim         = 0,            # Augmentation label dimensionality, 0 = no augmentation.
 
-        model_channels      = 192,          # Base multiplier for the number of channels.
+        model_channels      = 128,          # Base multiplier for the number of channels.
         channel_mult        = [1,2,3,4],    # Per-resolution multipliers for the number of channels.
         channel_mult_emb    = 4,            # Multiplier for the dimensionality of the embedding vector.
         num_blocks          = 3,            # Number of residual blocks per resolution.
         attn_resolutions    = [32,16,8],    # List of resolutions with self-attention.
         dropout             = 0.10,         # List of resolutions with self-attention.
         label_dropout       = 0,            # Dropout probability of class labels for classifier-free guidance.
+        geost_predict       = False
     ):
         super().__init__()
+        
         self.label_dropout = label_dropout
         emb_channels = model_channels * channel_mult_emb
         init = dict(init_mode='kaiming_uniform', init_weight=np.sqrt(1/3), init_bias=np.sqrt(1/3))
@@ -397,7 +473,7 @@ class DhariwalUNet(torch.nn.Module):
         self.map_augment = Linear(in_features=augment_dim, out_features=model_channels, bias=False, **init_zero) if augment_dim else None
         self.map_layer0 = Linear(in_features=model_channels, out_features=emb_channels, **init)
         self.map_layer1 = Linear(in_features=emb_channels, out_features=emb_channels, **init)
-        self.map_label = Linear(in_features=label_dim, out_features=emb_channels, bias=False, init_mode='kaiming_normal', init_weight=np.sqrt(label_dim)) if label_dim else None
+        self.map_label = Linear(in_features=label_dim, out_features=emb_channels, bias=False, init_mode='kaiming_normal', init_weight=np.sqrt(label_dim)) if label_dim and not geost_predict else None
 
         # Encoder.
         self.enc = torch.nn.ModuleDict()
@@ -414,6 +490,12 @@ class DhariwalUNet(torch.nn.Module):
                 cin = cout
                 cout = model_channels * mult
                 self.enc[f'{res}x{res}_block{idx}'] = UNetBlock(in_channels=cin, out_channels=cout, attention=(res in attn_resolutions), **block_kwargs)
+                print(res, res in attn_resolutions)
+        
+        if geost_predict: 
+            self.label_head = OutLabel_Head(in_channels=cout, out_channels=label_dim, img_resolution=img_resolution)
+        else:
+            self.label_head = None
         skips = [block.out_channels for block in self.enc.values()]
 
         # Decoder.
@@ -451,6 +533,9 @@ class DhariwalUNet(torch.nn.Module):
         for block in self.enc.values():
             x = block(x, emb) if isinstance(block, UNetBlock) else block(x)
             skips.append(x)
+       
+        if self.label_head is not None:
+            label = self.label_head(x) #.detach()
 
         # Decoder.
         for block in self.dec.values():
@@ -458,6 +543,10 @@ class DhariwalUNet(torch.nn.Module):
                 x = torch.cat([x, skips.pop()], dim=1)
             x = block(x, emb)
         x = self.out_conv(silu(self.out_norm(x)))
+
+        if self.label_head is not None:
+            x = (x,label)
+
         return x
 
 #----------------------------------------------------------------------------
@@ -626,7 +715,7 @@ class iDDPMPrecond(torch.nn.Module):
 
 #----------------------------------------------------------------------------
 # Improved preconditioning proposed in the paper "Elucidating the Design
-# Space of Diffusion-Based Generative Models" (EDM).
+# Space of Diffusion-Based Generative Models" (EDM). 
 
 @persistence.persistent_class
 class EDMPrecond(torch.nn.Module):
@@ -637,7 +726,7 @@ class EDMPrecond(torch.nn.Module):
         use_fp16        = False,            # Execute the underlying model at FP16 precision?
         sigma_min       = 0,                # Minimum supported noise level.
         sigma_max       = float('inf'),     # Maximum supported noise level.
-        sigma_data      = 0.5,              # Expected standard deviation of the training data.
+        sigma_data      = 0.5,              # Expected standard deviation of the training data. !!!!!!!!!should be .5 I set it to .58
         model_type      = 'DhariwalUNet',   # Class name of the underlying model.
         **model_kwargs,                     # Keyword arguments for the underlying model.
     ):
@@ -654,7 +743,8 @@ class EDMPrecond(torch.nn.Module):
     def forward(self, x, sigma, class_labels=None, force_fp32=False, **model_kwargs):
         x = x.to(torch.float32)
         sigma = sigma.to(torch.float32).reshape(-1, 1, 1, 1)
-        class_labels = None if self.label_dim == 0 else torch.zeros([1, self.label_dim], device=x.device) if class_labels is None else class_labels.to(torch.float32).reshape(-1, self.label_dim)
+        class_labels = None if self.label_dim == 0 or self.model.label_head is not None else torch.zeros([1, self.label_dim], device=x.device) if class_labels is None else class_labels.to(torch.float32).reshape(-1, self.label_dim)
+        
         dtype = torch.float16 if (self.use_fp16 and not force_fp32 and x.device.type == 'cuda') else torch.float32
 
         c_skip = self.sigma_data ** 2 / (sigma ** 2 + self.sigma_data ** 2)
@@ -663,9 +753,18 @@ class EDMPrecond(torch.nn.Module):
         c_noise = sigma.log() / 4
 
         F_x = self.model((c_in * x).to(dtype), c_noise.flatten(), class_labels=class_labels, **model_kwargs)
+        
+        if self.model.label_head is not None : F_x, label = F_x[0], F_x[1]
+
         assert F_x.dtype == dtype
+        
         D_x = c_skip * x + c_out * F_x.to(torch.float32)
-        return D_x
+        
+        if self.model.label_head is not None : 
+            return D_x, label
+        
+        else:
+            return D_x
 
     def round_sigma(self, sigma):
         return torch.as_tensor(sigma)
