@@ -1,4 +1,9 @@
-This repository contains modifications to the original work of Karras et al. (2022), below, to train Score-based diffusion models on complex geological frameworks. This code has been used here https://doi.org/10.1016/j.cageo.2025.106076 (Facies and acoustic impedance modeling) and will soon be presented for additional research works.
+This repository is forked from the original work of Karras et al. (2022), for DM-based complex geological modeling. 
+
+My modifications are intended for research purposes.
+This repository remains licensed under the Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International License. Users may use, modify, and redistribute this work for non-commercial purposes under the terms of that license. Please cite the original publication
+
+This code has been used here https://doi.org/10.1016/j.cageo.2025.106076 (Facies and acoustic impedance modeling) and will soon be presented for additional research works.
 
 
 
