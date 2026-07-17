@@ -1,3 +1,8 @@
+This repository contains modifications to the original work of Karras et al. (2022), below, to train Score-based diffusion models on complex geological frameworks. This code has been used here https://doi.org/10.1016/j.cageo.2025.106076 (Facies and acoustic impedance modeling) and will soon be presented for additional research works.
+
+
+
+
 ## Elucidating the Design Space of Diffusion-Based Generative Models (EDM)<br><sub>Official PyTorch implementation of the NeurIPS 2022 paper</sub>
 
 ![Teaser image](./docs/teaser-1920x640.jpg)
