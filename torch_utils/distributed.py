@@ -8,6 +8,7 @@
 import os
 import torch
 from . import training_stats
+import torch.distributed as dist
 
 #----------------------------------------------------------------------------
 
@@ -22,10 +23,11 @@ def init():
         os.environ['LOCAL_RANK'] = '0'
     if 'WORLD_SIZE' not in os.environ:
         os.environ['WORLD_SIZE'] = '1'
-
+    
+    os.environ['USE_LIBUV']='0'
     backend = 'gloo' if os.name == 'nt' else 'nccl'
-    torch.distributed.init_process_group(backend=backend, init_method='env://')
-    torch.cuda.set_device(int(os.environ.get('LOCAL_RANK', '0')))
+    torch.distributed.init_process_group(backend=backend, init_method='env://', rank=int(os.environ['RANK']), world_size=int(os.environ['WORLD_SIZE']))
+    torch.cuda.set_device(int(os.environ['LOCAL_RANK'], 0))
 
     sync_device = torch.device('cuda') if get_world_size() > 1 else None
     training_stats.init_multiprocessing(rank=get_rank(), sync_device=sync_device)
@@ -57,3 +59,6 @@ def print0(*args, **kwargs):
         print(*args, **kwargs)
 
 #----------------------------------------------------------------------------
+
+def destroy_process_group():
+    dist.destroy_process_group()
